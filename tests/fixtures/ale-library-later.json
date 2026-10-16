@@ -1,0 +1,122 @@
+{
+  "library": [
+    {
+      "asin": "B0FAKE0004",
+      "title": "The Glass Orchard",
+      "titleShort": "The Glass Orchard",
+      "authors": [
+        {
+          "name": "Sunniva Berg",
+          "url": "/a"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Hal Whitcombe",
+          "url": "/n"
+        }
+      ],
+      "length": "9h 30m ",
+      "cover": "71FAKEcoverD4",
+      "added": 5
+    },
+    {
+      "asin": "B0FAKE0005",
+      "title": "Field Notes from Nowhere",
+      "titleShort": "Field Notes from Nowhere",
+      "authors": [
+        {
+          "name": "Abel Quist",
+          "url": "/a"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Mina Sol",
+          "url": "/n"
+        }
+      ],
+      "length": "5h 12m ",
+      "cover": "81FAKEcoverE5",
+      "added": 4
+    },
+    {
+      "asin": "B0FAKE0001",
+      "title": "The Lighthouse Keeper's Ledger: A Novel",
+      "titleShort": "The Lighthouse Keeper's Ledger",
+      "authors": [
+        {
+          "name": "Maren Ostby",
+          "url": "/author/Maren-Ostby/B0FAKEA001"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Paul Adeyemi",
+          "url": "/search?searchNarrator=Paul+Adeyemi"
+        }
+      ],
+      "length": "11h 2m ",
+      "cover": "51FAKEcoverA1",
+      "progress": "Finished",
+      "format": "Unabridged",
+      "language": "English",
+      "releaseDate": "2021-04-06",
+      "added": 3
+    },
+    {
+      "asin": "B0FAKE0002",
+      "title": "Salt and Cedar",
+      "titleShort": "Salt and Cedar",
+      "authors": [
+        {
+          "name": "Ines Varga",
+          "url": "/author/x"
+        },
+        {
+          "name": "Tomas Reed",
+          "url": "/author/y"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Ruth Okafor",
+          "url": "/n"
+        },
+        {
+          "name": "Dev Mehta",
+          "url": "/n2"
+        }
+      ],
+      "length": "7h 45m ",
+      "cover": "61FAKEcoverB2",
+      "progress": "3h 1m left",
+      "format": "Unabridged",
+      "added": 2
+    },
+    {
+      "asin": "B0FAKE0003",
+      "title": "A Short History of Small Rivers",
+      "titleShort": "A Short History of Small Rivers",
+      "authors": [
+        {
+          "name": "Leopold Hart",
+          "url": "/a"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Leopold Hart",
+          "url": "/n"
+        }
+      ],
+      "length": "45m ",
+      "progress": "Not started",
+      "format": "Unabridged",
+      "added": 1
+    }
+  ],
+  "wishlist": [],
+  "config": {},
+  "version": "0.2.x-sample"
+}
