@@ -141,7 +141,7 @@ describe('M2-M5, L1, L5: import hygiene', () => {
   });
   it('L1: odd JSON gives a friendly message', () => {
     for (const t of ['null', '42', '{"foo":1}', '{"books":null}', '{"books":', '']) expect(() => jsonToBooks(t)).toThrow(ImportError);
-    expect(() => jsonToBooks('null')).toThrow('This is not a Home Library backup file.');
+    expect(() => jsonToBooks('null')).toThrow('This is not a Nineveh backup file.');
   });
   it('L5: CSV export neutralises formulas and import restores the text', () => {
     const csv = booksToCsv([{ ...books[0], title: '=HYPERLINK("http://evil","x")' }]);

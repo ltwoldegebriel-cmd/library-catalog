@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { safeCoverUrl } from '../lib/cover';
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 
 type Variant = 'primary' | 'ghost' | 'danger' | 'quiet';
@@ -23,7 +24,7 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
 }
 
 export function Input(p: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...p} className={`w-full min-w-0 min-h-11 px-3 rounded-lg bg-white/[0.04] border border-line text-fg placeholder:text-muted/70 focus:outline-none focus:border-accent ${p.className ?? ''}`} />;
+  return <input {...p} className={`w-full min-w-0 min-h-11 px-3 rounded-lg bg-white/[0.04] border border-line text-fg placeholder:text-muted/70 focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/70 ${p.className ?? ''}`} />;
 }
 
 export function Notice({ tone = 'info', children }: { tone?: 'info' | 'warn' | 'error'; children: ReactNode }) {
@@ -33,6 +34,7 @@ export function Notice({ tone = 'info', children }: { tone?: 'info' | 'warn' | '
 
 export function Cover({ url, title, className = '', compact = false }: { url: string; title: string; className?: string; compact?: boolean }) {
   const [failed, setFailed] = useState('');
+  url = safeCoverUrl(url);
   if (url && failed !== url) {
     return <img src={url} alt="" loading="lazy" className={`object-cover bg-white/5 rounded ${className}`} onError={() => setFailed(url)} />;
   }
@@ -59,11 +61,50 @@ export function PageTitle({ children, sub }: { children: ReactNode; sub?: ReactN
   );
 }
 
-export function Modal({ open, children }: { open: boolean; children: ReactNode }) {
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Modal dialog: focus moves inside (to the element marked data-autofocus, else the last
+ * button, which is the safe choice), Tab is trapped, Escape closes, and focus returns to
+ * whatever opened it.
+ */
+export function Modal({ open, onClose, labelledBy, children }: { open: boolean; onClose: () => void; labelledBy?: string; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const el = box.current!;
+    const items = () => [...el.querySelectorAll<HTMLElement>(FOCUSABLE)];
+    (el.querySelector<HTMLElement>('[data-autofocus]') ?? items().pop() ?? el).focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+      if (e.key !== 'Tab') return;
+      const f = items();
+      if (!f.length) { e.preventDefault(); return; }
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !el.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (document.activeElement === last || !el.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => { document.removeEventListener('keydown', onKey, true); if (opener?.isConnected) opener.focus(); };
+  }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-sm rounded-xl bg-panel border border-line p-5">{children}</div>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={labelledBy} className="w-full max-w-sm rounded-xl bg-panel border border-line p-5 outline-none">{children}</div>
     </div>
+  );
+}
+
+/** Where the book data came from, with the attribution and link back each service asks for. */
+export function SourceCredit({ source, link }: { source: string; link?: string }) {
+  const google = source.startsWith('Google');
+  return (
+    <p className="text-sm text-muted flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="source-credit">
+      {google
+        ? <span className="inline-flex items-center gap-1.5 rounded border border-line px-2 py-0.5 text-fg"><span aria-hidden className="font-semibold"><span style={{ color: '#4285F4' }}>G</span></span>Powered by Google</span>
+        : <span>Book data from Open Library</span>}
+      {link && <a href={link} target="_blank" rel="noopener noreferrer" className="underline hover:text-fg">View on {google ? 'Google Books' : 'Open Library'}</a>}
+    </p>
   );
 }

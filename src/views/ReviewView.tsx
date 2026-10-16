@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BookForm } from '../components/BookForm';
-import { Button, Notice, PageTitle } from '../components/ui';
+import { Button, Notice, PageTitle, SourceCredit } from '../components/ui';
+import { errorText } from '../lib/quota';
 import { db, findDuplicates, requestPersistence } from '../lib/db';
 import { combine } from '../lib/match';
 import { emptyDraft, newId, type Book, type Draft } from '../lib/types';
 
-export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
-  draft: Draft; source?: string; onSaved: (id: string) => void; onCancel: () => void; onOpen: (id: string) => void;
+export function ReviewView({ draft, source, link, restored, onSaved, onCancel, onOpen }: {
+  draft: Draft; source?: string; link?: string; restored?: boolean; onSaved: (id: string) => void; onCancel: () => void; onOpen: (id: string) => void;
 }) {
   const [d, setD] = useState(draft);
+  const [err, setErr] = useState('');
+  const ctx = useMemo(() => ({ kind: 'review' as const, source, link }), [source, link]);
   const [formKey, setFormKey] = useState(0);
   const [dups, setDups] = useState<Book[]>([]);
 
@@ -17,7 +20,7 @@ export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
   async function save(out: Draft) {
     const now = new Date().toISOString();
     const book: Book = { ...out, id: newId(), readDates: out.readDates ?? [], addedAt: now, updatedAt: now };
-    await db.books.add(book);
+    try { await db.books.add(book); } catch (e) { setErr(errorText(e)); return; }
     requestPersistence();
     onSaved(book.id);
   }
@@ -27,7 +30,7 @@ export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
     const ex = dups[0];
     const now = new Date().toISOString();
     const merged = combine(ex, { ...out, id: ex.id, readDates: out.readDates ?? [], addedAt: ex.addedAt, updatedAt: now }, false);
-    await db.books.put({ ...merged, updatedAt: now });
+    try { await db.books.put({ ...merged, updatedAt: now }); } catch (e) { setErr(errorText(e)); return; }
     onSaved(ex.id);
   }
 
@@ -41,6 +44,9 @@ export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
       <PageTitle sub={source ? `Found in ${source}. Check every field before saving.` : 'Fill in what you know. Only the title is required.'}>
         Review book
       </PageTitle>
+      {source && <div className="-mt-4 mb-5"><SourceCredit source={source} link={link} /></div>}
+      {restored && <div className="mb-5"><Notice>The app was updated. Your unsaved book was kept, so you can carry on.</Notice></div>}
+      {err && <div className="mb-5"><Notice tone="error">{err}</Notice></div>}
       {dups.length > 0 && (
         <div className="mb-5">
           <Notice tone="warn">
@@ -55,7 +61,7 @@ export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
           <Button variant="quiet" onClick={notThisBook}>Not this book? Clear the fields</Button>
         </div>
       )}
-      <BookForm key={formKey} initial={d} submitLabel={dups.length ? 'Save as a separate copy' : 'Save to library'} onSubmit={save} onCancel={onCancel}
+      <BookForm key={formKey} initial={d} ctx={ctx} baseline={restored && formKey === 0 ? emptyDraft() : undefined} submitLabel={dups.length ? 'Save as a separate copy' : 'Save to library'} onSubmit={save} onCancel={onCancel}
         secondary={dups.length ? { label: 'Add to the existing entry', onSubmit: addToExisting } : undefined} />
     </div>
   );

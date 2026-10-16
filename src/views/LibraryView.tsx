@@ -74,9 +74,9 @@ export function LibraryView({ onOpen, onAdd, onExport }: { onOpen: (id: string) 
 
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-3 mb-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-5">
         <h1 className="font-serif text-3xl tracking-tight">Library</h1>
-        <span className="text-sm text-muted whitespace-nowrap">{books.length} books · {readCount} read</span>
+        <span className="text-sm text-muted">{books.length} books · {readCount} read</span>
       </div>
 
       {needsBackup && (
@@ -93,10 +93,10 @@ export function LibraryView({ onOpen, onAdd, onExport }: { onOpen: (id: string) 
       <Input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Search title, author, ISBN, shelf" aria-label="Search" />
 
       <div className="flex flex-wrap gap-2 mt-3">
-        <div className="flex rounded-lg border border-line overflow-hidden" role="group" aria-label="Read filter">
+        <div className="flex flex-1 min-w-0 max-w-xs rounded-lg border border-line overflow-hidden" role="group" aria-label="Read filter">
           {(['all', 'unread', 'read'] as ReadFilter[]).map(f => (
             <button key={f} onClick={() => setRf(f)} aria-pressed={rf === f}
-              className={`min-h-11 px-3.5 text-sm capitalize ${rf === f ? 'bg-accent text-ink font-semibold' : 'text-muted hover:text-fg'}`}>{f}</button>
+              className={`flex-1 min-w-0 min-h-11 px-2 text-sm capitalize ${rf === f ? 'bg-accent text-ink font-semibold' : 'text-muted hover:text-fg'}`}>{f}</button>
           ))}
         </div>
         <div className="flex rounded-lg border border-line overflow-hidden ml-auto" role="group" aria-label="Layout">

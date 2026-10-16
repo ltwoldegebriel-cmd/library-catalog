@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Scanner } from '../components/Scanner';
-import { Button, Cover, Input, Notice, PageTitle } from '../components/ui';
+import { Button, Cover, Input, Notice, PageTitle, SourceCredit } from '../components/ui';
 import { checkIsbn, isbnErrorText, looksLikeIsbn, isbn13To10 } from '../lib/isbn';
-import { lookupIsbn, searchBooks } from '../lib/lookup';
+import { lookupIsbn, searchBooks, type SearchItem } from '../lib/lookup';
 import { emptyDraft, type Draft } from '../lib/types';
 
 type State =
@@ -12,11 +12,12 @@ type State =
   | { s: 'notfound'; isbn13: string }
   | { s: 'offline'; isbn13?: string }
   | { s: 'error'; msg: string; isbn13?: string }
-  | { s: 'results'; items: Draft[]; q: string };
+  | { s: 'results'; items: SearchItem[]; q: string };
 
-export function AddView({ onReview }: { onReview: (d: Draft, source?: string) => void }) {
+export function AddView({ onReview }: { onReview: (d: Draft, source?: string, link?: string) => void }) {
   const [q, setQ] = useState('');
   const [st, setSt] = useState<State>({ s: 'idle' });
+  const lastScan = useRef({ isbn: '', at: 0 });
 
   const manualFor = (isbn13?: string) =>
     onReview({ ...emptyDraft(), isbn13: isbn13 ?? '', isbn10: isbn13 ? isbn13To10(isbn13) ?? '' : '' });
@@ -24,7 +25,7 @@ export function AddView({ onReview }: { onReview: (d: Draft, source?: string) =>
   async function runIsbn(isbn13: string) {
     setSt({ s: 'busy', label: `Looking up ${isbn13}` });
     const r = await lookupIsbn(isbn13);
-    if (r.status === 'found') { setSt({ s: 'idle' }); onReview(r.draft, r.source); }
+    if (r.status === 'found') { setSt({ s: 'idle' }); onReview(r.draft, r.source, r.link); }
     else if (r.status === 'notfound') setSt({ s: 'notfound', isbn13 });
     else if (r.status === 'offline') setSt({ s: 'offline', isbn13 });
     else setSt({ s: 'error', msg: r.message, isbn13 });
@@ -44,13 +45,20 @@ export function AddView({ onReview }: { onReview: (d: Draft, source?: string) =>
     const r = await searchBooks(v);
     if (r === 'offline') setSt({ s: 'offline' });
     else if (r === 'error') setSt({ s: 'error', msg: 'The search service did not respond.' });
+    else if (r === 'ratelimited') setSt({ s: 'error', msg: 'Too many lookups in a short time. Wait a minute and try again, or enter the details by hand.' });
     else setSt({ s: 'results', items: r, q: v });
   }
 
   return (
     <div>
       <PageTitle sub="Scan the barcode, or type an ISBN, title or author.">Add a book</PageTitle>
-      <Scanner onDetected={isbn => { setQ(isbn); runIsbn(isbn); }} />
+      <Scanner onDetected={isbn => {
+        // Short cooldown: the same barcode seen again within 3 s, or while a lookup runs, is ignored.
+        const now = Date.now();
+        if (st.s === 'busy' || (lastScan.current.isbn === isbn && now - lastScan.current.at < 3000)) return;
+        lastScan.current = { isbn, at: now };
+        setQ(isbn); runIsbn(isbn);
+      }} />
 
       <form onSubmit={submit} className="mt-8">
         <label htmlFor="manual" className="block text-xs uppercase tracking-wider text-muted mb-1.5">ISBN, title or author</label>
@@ -87,10 +95,11 @@ export function AddView({ onReview }: { onReview: (d: Draft, source?: string) =>
         {st.s === 'results' && (
           <div>
             <p className="text-sm text-muted mb-2">{st.items.length ? `Matches for "${st.q}". Pick one to review.` : `Nothing found for "${st.q}".`}</p>
+            {st.items[0] && <div className="mb-2"><SourceCredit source={st.items[0].source} /></div>}
             <ul className="divide-y divide-line border-y border-line">
-              {st.items.map((d, i) => (
+              {st.items.map(({ draft: d, source, link }, i) => (
                 <li key={i}>
-                  <button onClick={() => onReview(d, 'Open Library search')} className="w-full flex gap-3 py-3 text-left min-h-11 hover:bg-white/[0.03]">
+                  <button onClick={() => onReview(d, source === 'Google Books' ? 'Google Books search' : 'Open Library search', link)} className="w-full flex gap-3 py-3 text-left min-h-11 hover:bg-white/[0.03]">
                     <Cover url={d.coverUrl} title={d.title} className="w-10 h-15 shrink-0" compact />
                     <span className="min-w-0">
                       <span className="block font-serif text-[17px] leading-snug break-words">{d.title}</span>

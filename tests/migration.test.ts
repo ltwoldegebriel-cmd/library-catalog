@@ -69,7 +69,7 @@ describe('migrateRecords (v3, pure)', () => {
 
   it('keeps old v1 records, untitled records and Ge\'ez titles', () => {
     expect(byId.get('v1-old')).toMatchObject({ formats: ['Print'], narrators: '', readDates: ['2019-09-09'] });
-    expect(byId.get('no-title')).toMatchObject({ title: '', notes: 'Imported row with no title' });
+    expect(byId.get('no-title')).toMatchObject({ title: 'Untitled (from old data)', notes: 'Imported row with no title' });
     expect(byId.get('geez-p')!.formats).toEqual(['Print', 'Audiobook']);
   });
 });

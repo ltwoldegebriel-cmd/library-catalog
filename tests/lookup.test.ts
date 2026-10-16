@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { lookupIsbn } from '../src/lib/lookup';
+import { lookupIsbn, clearLookupCache, openLibraryPolicy } from '../src/lib/lookup';
 
 const g = globalThis as any;
 let orig: any;
-beforeEach(() => { orig = g.fetch; Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true }); });
+beforeEach(() => { clearLookupCache(); openLibraryPolicy.gapMs = 0; orig = g.fetch; Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true }); });
 afterEach(() => { g.fetch = orig; });
 
 const isbn = '9780306406157';

@@ -4,6 +4,13 @@ import type { Book } from './types';
 import { isValidReadDate, mergeDates, newId, toFormats } from './types';
 import { checkIsbn, cleanIsbn } from './isbn';
 import { BookIndex, combine, sameBook } from './match';
+import { safeCoverUrl } from './cover';
+
+/** Files bigger than this are refused before reading. */
+export const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+/** Spreadsheet limits: more rows or columns than this are never read. */
+export const XLSX_MAX_ROWS = 100_000;
+export const XLSX_MAX_COLS = 60;
 
 export const COLUMNS: (keyof Book)[] = [
   'id', 'title', 'authors', 'formats', 'narrators', 'length', 'asin', 'isbn13', 'isbn10', 'publisher', 'year', 'pages',
@@ -11,8 +18,8 @@ export const COLUMNS: (keyof Book)[] = [
 ];
 
 /** What was cleaned up while reading a file, for the import summary. */
-export interface ParseReport { droppedDates: number; invalidIsbns: number; skippedRows: number }
-export const newReport = (): ParseReport => ({ droppedDates: 0, invalidIsbns: 0, skippedRows: 0 });
+export interface ParseReport { droppedDates: number; invalidIsbns: number; skippedRows: number; droppedCovers: number }
+export const newReport = (): ParseReport => ({ droppedDates: 0, invalidIsbns: 0, skippedRows: 0, droppedCovers: 0 });
 
 export class ImportError extends Error {}
 
@@ -30,9 +37,11 @@ function toRow(b: Book): Row {
 const str = (v: unknown) => (v === undefined || v === null ? '' : String(v));
 
 /** Spreadsheet formula injection guard (CSV only). */
-const FORMULA_START = /^[=+\-@\t\r]/;
+// A value the user typed with its own leading apostrophe (like '=abc) gets one more, so the
+// guard can always be removed exactly once on re-import.
+const FORMULA_START = /^'*[=+\-@\t\r]/;
 export const escapeCell = (v: string) => (FORMULA_START.test(v) ? "'" + v : v);
-export const unescapeCell = (v: string) => (/^'[=+\-@\t\r]/.test(v) ? v.slice(1) : v);
+export const unescapeCell = (v: string) => (/^'+[=+\-@\t\r]/.test(v) ? v.slice(1) : v);
 
 /** Accepts loose headers too (e.g. "Title", "Author", "ISBN") from other apps, and old single "format" files. */
 function fromRow(r: Record<string, unknown>, rep: ParseReport = newReport()): Book | null {
@@ -61,6 +70,9 @@ function fromRow(r: Record<string, unknown>, rep: ParseReport = newReport()): Bo
   rep.droppedDates += new Set(dates).size - readDates.length;
 
   const fv = lower['formats'] ?? lower['format'];
+  const rawCover = g('coverurl', 'cover');
+  const coverUrl = safeCoverUrl(rawCover);
+  if (rawCover && !coverUrl) rep.droppedCovers++;
   return {
     id: g('id') || newId(),
     title,
@@ -77,7 +89,7 @@ function fromRow(r: Record<string, unknown>, rep: ParseReport = newReport()): Bo
     shelf: g('shelf', 'location'),
     notes: str(lower['notes']),
     readDates,
-    coverUrl: g('coverurl', 'cover'),
+    coverUrl,
     addedAt: g('addedat'),
     updatedAt: g('updatedat'), // '' means the file did not say; treated as older than in-app edits
   };
@@ -88,9 +100,15 @@ export function booksToCsv(books: Book[]): string {
   return Papa.unparse(rows, { columns: COLUMNS as string[], newline: '\r\n' });
 }
 
+/** A CSV this app wrote (it has the id and readDates columns), so its apostrophe guards can be undone. */
+export const isOwnCsvHeader = (fields: string[]) => ['id', 'readDates', 'updatedAt'].every(c => fields.includes(c));
+
 export function csvToBooks(text: string, rep: ParseReport = newReport()): Book[] {
-  const res = Papa.parse<Record<string, string>>(text.replace(/^\uFEFF/, ''), {
-    header: true, skipEmptyLines: 'greedy', dynamicTyping: false, transform: unescapeCell,
+  const body = text.replace(/^\uFEFF/, '');
+  const first = Papa.parse<string[]>(body, { preview: 1 }).data[0] ?? [];
+  const own = isOwnCsvHeader(first.map(f => String(f).trim()));
+  const res = Papa.parse<Record<string, string>>(body, {
+    header: true, skipEmptyLines: 'greedy', dynamicTyping: false, transform: own ? unescapeCell : undefined,
   });
   const bad = res.errors.find(e => e.type === 'Quotes');
   if (bad) throw new ImportError(`Row ${(bad.row ?? 0) + 1} could not be read (a quote is not closed). Nothing was imported.`);
@@ -101,7 +119,7 @@ export function booksToJson(books: Book[]): string {
   return JSON.stringify({ app: 'home-library', version: 2, exportedAt: new Date().toISOString(), books }, null, 2);
 }
 
-const NOT_BACKUP = 'This is not a Home Library backup file.';
+const NOT_BACKUP = 'This is not a Nineveh backup file.';
 
 export function jsonToBooks(text: string, rep: ParseReport = newReport()): Book[] {
   let j: unknown;
@@ -133,8 +151,19 @@ export function booksToXlsx(books: Book[]): ArrayBuffer {
 export function xlsxToBooks(data: ArrayBuffer, rep: ParseReport = newReport()): Book[] {
   let rows: Record<string, unknown>[];
   try {
-    const wb = XLSX.read(data, { type: 'array' });
+    const wb = XLSX.read(data, { type: 'array', sheetRows: XLSX_MAX_ROWS + 1, cellFormula: false, cellHTML: false, cellStyles: false });
     const ws = wb.Sheets[wb.SheetNames[0]];
+    // Never trust the declared <dimension>: a 6 KB file can claim 17 billion cells.
+    // Recompute the range from the cells that really exist, capped to sane limits.
+    let maxR = -1, maxC = -1;
+    for (const k of Object.keys(ws)) {
+      if (k[0] === '!') continue;
+      const c = XLSX.utils.decode_cell(k);
+      if (c.c < XLSX_MAX_COLS && c.c > maxC) maxC = c.c;
+      if (c.r > maxR) maxR = c.r;
+    }
+    if (maxR < 0 || maxC < 0) return [];
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.min(maxR, XLSX_MAX_ROWS), c: maxC } });
     rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { raw: false, defval: '' });
   } catch { throw new ImportError('This is not a readable Excel file.'); }
   return rows.map(r => fromRow(r, rep)).filter((b): b is Book => !!b);

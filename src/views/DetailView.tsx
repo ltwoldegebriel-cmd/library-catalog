@@ -1,17 +1,21 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../lib/db';
 import { BookForm } from '../components/BookForm';
 import { Button, Cover, Input, Modal } from '../components/ui';
 import { formatDate, isValidReadDate, todayLocal, type Draft } from '../lib/types';
 
-export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
+export function DetailView({ id, onBack, restoreDraft }: { id: string; onBack: () => void; restoreDraft?: Draft }) {
   const book = useLiveQuery(() => db.books.get(id), [id]);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(!!restoreDraft);
+  const [restored, setRestored] = useState(restoreDraft);
+  const ctx = useMemo(() => ({ kind: 'edit' as const, id }), [id]);
   const [confirmDel, setConfirmDel] = useState(false);
   const [readDate, setReadDate] = useState(todayLocal());
   const [removeDate, setRemoveDate] = useState<number | null>(null);
   const [dateError, setDateError] = useState('');
+  const closeDel = useCallback(() => setConfirmDel(false), []);
+  const closeDate = useCallback(() => setRemoveDate(null), []);
 
   if (book === undefined) return null;
   if (!book) return <p className="text-muted">This book is no longer in your library.</p>;
@@ -34,6 +38,7 @@ export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
   }
   async function saveEdit(d: Draft) {
     await db.books.update(id, { ...d, ...touch() });
+    setRestored(undefined);
     setEditing(false);
   }
 
@@ -41,7 +46,8 @@ export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
     return (
       <div>
         <h1 className="font-serif text-3xl mb-6">Edit book</h1>
-        <BookForm initial={book} submitLabel="Save changes" onSubmit={saveEdit} onCancel={() => setEditing(false)} />
+        {restored && <p className="mb-5 text-[15px] rounded-lg border border-line px-4 py-3">The app was updated. Your unsaved changes were kept.</p>}
+        <BookForm initial={restored ?? book} baseline={book} ctx={ctx} submitLabel="Save changes" onSubmit={saveEdit} onCancel={() => { setRestored(undefined); setEditing(false); }} />
       </div>
     );
   }
@@ -99,20 +105,20 @@ export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
         <Button variant="danger" onClick={() => setConfirmDel(true)} className="flex-1 min-w-32">Delete</Button>
       </div>
 
-      <Modal open={confirmDel}>
-        <h2 className="font-serif text-xl">Delete this book?</h2>
+      <Modal open={confirmDel} onClose={closeDel} labelledBy="del-title">
+        <h2 id="del-title" className="font-serif text-xl">Delete this book?</h2>
         <p className="text-muted mt-2 text-[15px]">"{book.title}" and its read dates will be removed. This can't be undone unless you have a backup.</p>
         <div className="flex gap-3 mt-5">
           <Button variant="danger" className="flex-1" onClick={async () => { await db.books.delete(id); onBack(); }}>Delete</Button>
-          <Button className="flex-1" onClick={() => setConfirmDel(false)}>Keep it</Button>
+          <Button className="flex-1" data-autofocus onClick={closeDel}>Keep it</Button>
         </div>
       </Modal>
-      <Modal open={removeDate !== null}>
-        <h2 className="font-serif text-xl">Remove this read date?</h2>
+      <Modal open={removeDate !== null} onClose={closeDate} labelledBy="date-title">
+        <h2 id="date-title" className="font-serif text-xl">Remove this read date?</h2>
         <p className="text-muted mt-2 text-[15px]">{removeDate !== null && formatDate(book.readDates[removeDate])}</p>
         <div className="flex gap-3 mt-5">
           <Button variant="danger" className="flex-1" onClick={() => dropDate(removeDate!)}>Remove</Button>
-          <Button className="flex-1" onClick={() => setRemoveDate(null)}>Cancel</Button>
+          <Button className="flex-1" data-autofocus onClick={closeDate}>Cancel</Button>
         </div>
       </Modal>
     </div>

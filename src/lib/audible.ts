@@ -18,6 +18,7 @@
  *   Goodreads variant uses "Title", "Author", "ISBN", "ISBN13", "ASIN".
  */
 import Papa from 'papaparse';
+import { safeCoverUrl } from './cover';
 import type { Book } from './types';
 import { newId, unionFormats } from './types';
 import { BookIndex, sameBook } from './match';
@@ -47,8 +48,8 @@ function unformula(v: string): string {
 function cleanCover(v: string): string {
   const s = unformula(v);
   if (!s || s.startsWith('data:')) return '';
-  if (/^https?:\/\//.test(s)) return s.replace(/\._SL\d+_\./, '._SL500_.');
-  return /^[\w%+-]+$/.test(s) ? coverFromId(s) : '';
+  if (/^https?:\/\//.test(s)) return safeCoverUrl(s.replace(/\._SL\d+_\./, '._SL500_.'));
+  return /^[\w%+-]+$/.test(s) ? safeCoverUrl(coverFromId(s)) : '';
 }
 
 const cleanLength = (v: unknown) => String(v ?? '').trim().replace(/\s+/g, ' ');

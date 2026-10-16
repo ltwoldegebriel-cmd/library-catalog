@@ -1,10 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { trackDraft, type DraftCtx } from '../lib/update';
 import { FORMATS, sortFormats, type Draft, type Format } from '../lib/types';
 import { checkIsbn, isbnErrorText, cleanIsbn } from '../lib/isbn';
 import { Button, Cover, Field, Input } from './ui';
+import { safeCoverUrl } from '../lib/cover';
 
-export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra, secondary }: {
+export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra, secondary, ctx, baseline }: {
   initial: Draft; submitLabel: string; secondary?: { label: string; onSubmit: (d: Draft) => void };
+  /** Where this form lives, so unsaved typing can be restored after an app update. */
+  ctx?: DraftCtx;
+  /** What counts as "unchanged" (defaults to initial). A restored draft is dirty from the start. */
+  baseline?: Draft;
   onSubmit: (d: Draft) => void; onCancel: () => void; extra?: React.ReactNode;
 }) {
   const [d, setD] = useState<Draft>(initial);
@@ -14,12 +20,17 @@ export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra, seco
   const isbnRaw = d.isbn13 || d.isbn10;
   const isbnChk = isbnRaw ? checkIsbn(isbnRaw) : null;
   const titleMissing = !d.title.trim();
+  const base = baseline ?? initial;
+  const dirty = (Object.keys(d) as (keyof Draft)[]).some(k => JSON.stringify(d[k] ?? '') !== JSON.stringify(base[k] ?? ''));
+  useEffect(() => { trackDraft(ctx && dirty ? { ctx, draft: d } : null); }, [ctx, dirty, d]);
+  useEffect(() => () => trackDraft(null), []);
 
   function finish(cb: (d: Draft) => void) {
     setTouched(true);
     if (titleMissing) return;
-    let out = { ...d, title: d.title.trim() };
+    let out = { ...d, title: d.title.trim(), coverUrl: safeCoverUrl(d.coverUrl) };
     if (isbnChk?.ok) out = { ...out, isbn13: isbnChk.isbn13, isbn10: isbnChk.isbn10 ?? '' };
+    trackDraft(null);
     cb(out);
   }
   function submit(e: React.FormEvent) {
@@ -76,11 +87,11 @@ export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra, seco
         <Field label="Year"><Input inputMode="numeric" value={d.year} onChange={set('year')} /></Field>
         <Field label="Pages"><Input inputMode="numeric" value={d.pages} onChange={set('pages')} /></Field>
         <div className="col-span-2"><Field label="Shelf or location"><Input value={d.shelf} onChange={set('shelf')} placeholder="e.g. Study, top shelf" /></Field></div>
-        <div className="col-span-2"><Field label="Cover image URL"><Input value={d.coverUrl} onChange={set('coverUrl')} /></Field></div>
+        <div className="col-span-2"><Field label="Cover image URL" hint={d.coverUrl && !safeCoverUrl(d.coverUrl) ? <span className="text-red-300">Only https links from Open Library, Google Books or Audible covers are kept. This one will be removed when you save.</span> : undefined}><Input value={d.coverUrl} onChange={set('coverUrl')} inputMode="url" /></Field></div>
         <div className="col-span-2">
           <Field label="Notes">
             <textarea value={d.notes} onChange={set('notes')} rows={3}
-              className="w-full min-w-0 px-3 py-2 rounded-lg bg-white/[0.04] border border-line text-fg focus:outline-none focus:border-accent" />
+              className="w-full min-w-0 px-3 py-2 rounded-lg bg-white/[0.04] border border-line text-fg focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/70" />
           </Field>
         </div>
       </div>

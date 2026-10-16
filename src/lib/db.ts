@@ -1,9 +1,24 @@
 import Dexie, { type Table } from 'dexie';
 import type { Book } from './types';
-import { migrateRecords } from './migrate';
+import { migrateRecords, newCleanup, normalizeRecord, type CleanupReport } from './migrate';
 import { titleAuthorKey } from './match';
 
 export const PREMIGRATION_KEY = 'home-library-backup-before-v3';
+export const CLEANUP_KEY = 'nineveh-migration-cleanup';
+
+function noteCleanup(c: CleanupReport) {
+  if (!c.droppedDates && !c.untitled && !c.droppedCovers) return;
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(CLEANUP_KEY, JSON.stringify(c)); } catch { /* ignore */ }
+}
+/** Cleanup done by the last upgrade, shown once to the user. */
+export function takeCleanupNotice(): CleanupReport | null {
+  try {
+    const v = localStorage.getItem(CLEANUP_KEY);
+    if (!v) return null;
+    localStorage.removeItem(CLEANUP_KEY);
+    return { ...newCleanup(), ...JSON.parse(v) };
+  } catch { return null; }
+}
 
 interface Snapshot { id?: number; reason: string; savedAt: string; books: unknown[] }
 
@@ -29,9 +44,23 @@ class LibraryDB extends Dexie {
       try { if (typeof localStorage !== 'undefined') localStorage.setItem(PREMIGRATION_KEY, JSON.stringify(snap)); }
       catch { /* storage full: the snapshot table below still has it */ }
       await tx.table('snapshots').add(snap);
-      const { books: next, removed } = migrateRecords(all);
+      const { books: next, removed, cleanup } = migrateRecords(all);
       await books.bulkPut(next);
       if (removed.length) await books.bulkDelete(removed.map(r => r.id));
+      noteCleanup(cleanup);
+    });
+    // v4: libraries already on v3 get the same cleanup (bad read dates, string read dates,
+    // empty or non-text titles, unsafe cover URLs). No merging, never drops a book.
+    this.version(4).stores({}).upgrade(async tx => {
+      const cleanup = newCleanup();
+      const books = tx.table('books');
+      const all: Record<string, unknown>[] = await books.toArray();
+      const changed = all.map(r => ({ r, n: normalizeRecord(r, cleanup) })).filter(({ r, n }) =>
+        JSON.stringify(n) !== JSON.stringify({ ...n, ...Object.fromEntries(Object.keys(n).map(k => [k, r[k]])) }));
+      if (!changed.length) return;
+      await tx.table('snapshots').add({ reason: 'before v4 cleanup', savedAt: new Date().toISOString(), books: changed.map(c => c.r) });
+      await books.bulkPut(changed.map(c => c.n));
+      noteCleanup(cleanup);
     });
   }
 }
