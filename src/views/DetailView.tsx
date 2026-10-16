@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../lib/db';
 import { BookForm } from '../components/BookForm';
 import { Button, Cover, Input, Modal } from '../components/ui';
-import { formatDate, todayLocal, type Draft } from '../lib/types';
+import { formatDate, isValidReadDate, todayLocal, type Draft } from '../lib/types';
 
 export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const book = useLiveQuery(() => db.books.get(id), [id]);
@@ -11,6 +11,7 @@ export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [readDate, setReadDate] = useState(todayLocal());
   const [removeDate, setRemoveDate] = useState<number | null>(null);
+  const [dateError, setDateError] = useState('');
 
   if (book === undefined) return null;
   if (!book) return <p className="text-muted">This book is no longer in your library.</p>;
@@ -19,6 +20,10 @@ export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
 
   async function markRead() {
     if (!readDate) return;
+    if (readDate > todayLocal()) { setDateError("That date is in the future. Pick today or an earlier day."); return; }
+    if (!isValidReadDate(readDate)) { setDateError('That is not a valid date.'); return; }
+    if (book!.readDates.includes(readDate)) { setDateError(`${formatDate(readDate)} is already in the list.`); return; }
+    setDateError('');
     const dates = [...book!.readDates, readDate].sort();
     await db.books.update(id, { readDates: dates, ...touch() });
     setReadDate(todayLocal());
@@ -42,7 +47,7 @@ export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
   }
 
   const meta: [string, string][] = ([
-    ['Format', book.format], ['Narrators', book.narrators.replace(/;\s*/g, ', ')], ['Length', book.length],
+    ['Formats', book.formats.join(', ')], ['Narrators', book.narrators.replace(/;\s*/g, ', ')], ['Length', book.length],
     ['Publisher', book.publisher], ['Year', book.year], ['Pages', book.pages],
     ['ISBN-13', book.isbn13], ['ISBN-10', book.isbn10], ['ASIN', book.asin], ['Shelf', book.shelf],
     ['Added', formatDate(book.addedAt.slice(0, 10))],
@@ -80,12 +85,13 @@ export function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
         <div className="flex flex-wrap gap-2 items-end">
           <label className="flex-1 min-w-40">
             <span className="block text-xs uppercase tracking-wider text-muted mb-1.5">Date finished</span>
-            <Input type="date" value={readDate} max={todayLocal()} onChange={e => setReadDate(e.target.value)} />
+            <Input type="date" value={readDate} max={todayLocal()} onChange={e => { setReadDate(e.target.value); setDateError(''); }} aria-invalid={!!dateError} aria-describedby="date-error" />
           </label>
           <Button variant="primary" onClick={markRead} disabled={!readDate} className="flex-1 min-w-40">
             {book.readDates.length ? 'Mark as read again' : 'Mark as read'}
           </Button>
         </div>
+        {dateError && <p id="date-error" role="alert" className="text-sm text-red-300 mt-2">{dateError}</p>}
       </section>
 
       <div className="mt-8 border-t border-line pt-6 flex flex-wrap gap-3">

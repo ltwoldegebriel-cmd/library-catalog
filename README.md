@@ -6,7 +6,8 @@ A local-first catalog for the books at home. Scan an ISBN barcode or type it, re
 
     npm install
     npm run dev        # http://localhost:5173
-    npm test           # ISBN validation, CSV/JSON/XLSX round-trip, merge
+    npm test           # unit tests: ISBN, round-trips, merge rules, Audible import, migration, lookup
+    npm run stress     # volume and bad-input stress scripts
     npm run build      # static PWA in dist/, built for /library-catalog/ (GitHub Pages)
 
 ## How it works
@@ -14,11 +15,14 @@ A local-first catalog for the books at home. Scan an ISBN barcode or type it, re
 - **Scan:** BarcodeDetector where the browser has it (Android Chrome), ZXing otherwise (iPhone Safari). Only EAN-13 codes starting 978 or 979 are accepted.
 - **Lookup:** Open Library ISBN API, then Google Books. Title or author searches use the Open Library search API. Only the ISBN or search text is sent.
 - **Storage:** IndexedDB via Dexie, on the device only. Covers are cached by the service worker.
-- **Format:** every book is Print, Audiobook or Ebook (default Print). Audiobooks also carry narrators, length and ASIN.
-- **Audible import:** reads the CSV spreadsheet and the raw data JSON from the [Audible Library Extractor](https://joonaspaakko.github.io/audible-library-extractor/) extension. New titles are added as Audiobook; titles already in the library (same ASIN, or same title and first author among audiobooks) are skipped, so re-importing only adds new purchases. tests/fixtures holds fake sample files in the extractor's format.
-- **Export and import:** CSV, .xlsx (SheetJS) and JSON, all round-trip safe. Import merges by id, then ISBN-13, then title and author; the newest edit wins.
+- **One entry per title:** each book has a set of owned formats (Print, Audiobook, Ebook, any combination; default Print), shown as badges, with a "Both / multiple formats" filter. Audiobooks also carry narrators, length and ASIN.
+- **Matching rules** (src/lib/match.ts): same id, ASIN, ISBN-13, or normalised full title plus first author. Never title alone, and never across two different ASINs.
+- **Audible import:** reads the CSV spreadsheet and the raw data JSON from the [Audible Library Extractor](https://joonaspaakko.github.io/audible-library-extractor/) extension. New titles are added as Audiobook. A title you already own in print or ebook gets Audiobook added to that entry, with its ASIN, narrators and length. Re-importing only adds new purchases. tests/fixtures holds fake sample files in the extractor's format.
+- **Export and import:** CSV, .xlsx (SheetJS) and JSON, all round-trip safe. Import merges by the matching rules. Formats and read dates are unioned and empty fields filled; your in-app edits win unless you tick "Let newer edits in the file replace mine" and the file row is newer. Old files with a single format column still import.
 - **Sync with a computer:** "Backup to file" writes one JSON file (into iCloud Drive, Google Drive or Dropbox, or AirDrop it). "Load from backup" on the other device merges it in.
 
 ## Notes
 
 - The camera only works on HTTPS (or localhost). Test scanning on the phone after hosting.
+
+- Upgrading to database version 3 saves a copy of every record to localStorage (`home-library-backup-before-v3`) and to a `snapshots` table before converting formats and merging print/audio pairs.

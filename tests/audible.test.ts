@@ -59,7 +59,7 @@ describe('Audible dedupe and re-import', () => {
     const plan = planAudibleImport([], parseAudibleJson(fx('ale-library.json')), now);
     expect(plan.newCount).toBe(3);
     expect(plan.existingCount).toBe(0);
-    expect(plan.add.every(b => b.format === 'Audiobook' && b.readDates.length === 0)).toBe(true);
+    expect(plan.add.every(b => b.formats.join() === 'Audiobook' && b.readDates.length === 0)).toBe(true);
   });
 
   it('re-import only adds new purchases', () => {
@@ -82,12 +82,34 @@ describe('Audible dedupe and re-import', () => {
     const existing = planAudibleImport([], parseAudibleJson(fx('ale-library.json')), now).add.map(b => ({ ...b, asin: '' }));
     const items = parseAudibleJson(fx('ale-library.json')).map(i => ({ ...i, title: i.title.toUpperCase() + '!', asin: '' }));
     expect(planAudibleImport(existing, items, now)).toMatchObject({ newCount: 0, existingCount: 3 });
-    expect(titleAuthorKey("The Lighthouse Keeper's Ledger: A Novel", 'Maren Ostby; X')).toBe(titleAuthorKey('lighthouse keepers ledger', 'Maren Ostby'));
+    expect(titleAuthorKey("The Lighthouse Keeper's Ledger: A Novel", 'Maren Ostby; X')).toBe(titleAuthorKey('lighthouse keepers ledger: a novel', 'Maren Ostby'));
+    expect(titleAuthorKey('Untitled', '')).toBe(''); // never title alone
   });
 
-  it('owning the print edition does not block the audiobook', () => {
-    const print = { ...planAudibleImport([], parseAudibleJson(fx('ale-library.json')), now).add[0], format: 'Print', asin: '' } as Book;
-    expect(planAudibleImport([print], parseAudibleJson(fx('ale-library.json')), now).newCount).toBe(3);
+  it('a print book of the same title gains Audiobook instead of a second entry', () => {
+    const print = { ...planAudibleImport([], parseAudibleJson(fx('ale-library.json')), now).add[0], id: 'print1', formats: ['Print'], asin: '', narrators: '', length: '', shelf: 'Study', readDates: ['2020-02-02'] } as Book;
+    const plan = planAudibleImport([print], parseAudibleJson(fx('ale-library.json')), now);
+    expect(plan).toMatchObject({ newCount: 2, mergedCount: 1, existingCount: 0 });
+    expect(plan.update[0]).toMatchObject({ id: 'print1', formats: ['Print', 'Audiobook'], asin: 'B0FAKE0001', narrators: 'Paul Adeyemi', length: '11h 2m', shelf: 'Study', readDates: ['2020-02-02'] });
+    // Re-importing after the merge adds nothing.
+    const again = planAudibleImport([plan.update[0], ...plan.add], parseAudibleJson(fx('ale-library.json')), now);
+    expect(again).toMatchObject({ newCount: 0, mergedCount: 0, existingCount: 3, update: [] });
+  });
+
+  it('matches a print book by ISBN-13 too', () => {
+    const print = { id: 'p', title: 'Different Title Text', authors: 'Someone', formats: ['Print'], isbn13: '9780306406157' } as Book;
+    const it0 = { ...parseAudibleJson(fx('ale-library.json'))[0], isbn13: '9780306406157' };
+    expect(planAudibleImport([{ ...print, narrators: '', length: '', asin: '', isbn10: '', publisher: '', year: '', pages: '', coverUrl: '', shelf: '', notes: '', readDates: [], addedAt: '', updatedAt: '' }], [it0], now).mergedCount).toBe(1);
+  });
+
+  it('H1: series books with the same base title are all imported (ASIN first)', () => {
+    const mkA = (t: string, a: string) => ({ title: t, authors: 'J.K. Rowling', narrators: '', length: '', asin: a, coverUrl: '', isbn13: '', isbn10: '' });
+    const p = planAudibleImport([], [mkA('Harry Potter: Book 1', 'B1'), mkA('Harry Potter: Book 2', 'B2')], now);
+    expect(p).toMatchObject({ newCount: 2, skippedInFile: 0 });
+    const p2 = planAudibleImport(p.add, [mkA('Harry Potter: Book 3', 'B3'), mkA('Harry Potter: Book 1', 'B1')], now);
+    expect(p2).toMatchObject({ newCount: 1, existingCount: 1 });
+    // Same title and author but a different ASIN than the owned audiobook: a different product.
+    expect(planAudibleImport(p.add, [mkA('Harry Potter: Book 1', 'B9')], now).newCount).toBe(1);
   });
 
   it('skips repeats inside one file', () => {

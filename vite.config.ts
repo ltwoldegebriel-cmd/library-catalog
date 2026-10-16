@@ -3,9 +3,9 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command, isPreview }) => ({
   // GitHub Pages project site lives at /library-catalog/
-  base: command === 'build' ? '/library-catalog/' : '/',
+  base: command === 'build' || isPreview ? '/library-catalog/' : '/',
   plugins: [
     react(),
     tailwindcss(),
@@ -36,5 +36,5 @@ export default defineConfig(({ command }) => ({
       },
     }),
   ],
-  test: { environment: 'node' },
+  test: { environment: 'node', include: ['tests/**/*.test.ts'] },
 } as any));

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { BookForm } from '../components/BookForm';
 import { Button, Notice, PageTitle } from '../components/ui';
-import { db, findDuplicates } from '../lib/db';
+import { db, findDuplicates, requestPersistence } from '../lib/db';
+import { combine } from '../lib/match';
 import { emptyDraft, newId, type Book, type Draft } from '../lib/types';
 
 export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
@@ -11,13 +12,23 @@ export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
   const [formKey, setFormKey] = useState(0);
   const [dups, setDups] = useState<Book[]>([]);
 
-  useEffect(() => { findDuplicates(d.isbn13, d.title).then(setDups); }, [d.isbn13, d.title]);
+  useEffect(() => { findDuplicates(d.isbn13, d.title, d.authors).then(setDups); }, [d.isbn13, d.title, d.authors]);
 
   async function save(out: Draft) {
     const now = new Date().toISOString();
     const book: Book = { ...out, id: newId(), readDates: out.readDates ?? [], addedAt: now, updatedAt: now };
     await db.books.add(book);
+    requestPersistence();
     onSaved(book.id);
+  }
+
+  /** One entry per title: fold this copy's formats and details into the existing entry. */
+  async function addToExisting(out: Draft) {
+    const ex = dups[0];
+    const now = new Date().toISOString();
+    const merged = combine(ex, { ...out, id: ex.id, readDates: out.readDates ?? [], addedAt: ex.addedAt, updatedAt: now }, false);
+    await db.books.put({ ...merged, updatedAt: now });
+    onSaved(ex.id);
   }
 
   function notThisBook() {
@@ -34,7 +45,7 @@ export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
         <div className="mb-5">
           <Notice tone="warn">
             <p className="font-semibold">You already have this book.</p>
-            <p className="text-muted text-sm mt-1">"{dups[0].title}" is in your library{dups.length > 1 ? ` (${dups.length} copies)` : ''}. Saving adds another copy.</p>
+            <p className="text-muted text-sm mt-1">"{dups[0].title}" is in your library as {dups[0].formats.join(' and ')}. Saving adds the formats you pick below to that entry, so there is one entry per title.</p>
             <Button className="mt-3" onClick={() => onOpen(dups[0].id)}>View the existing copy</Button>
           </Notice>
         </div>
@@ -44,7 +55,8 @@ export function ReviewView({ draft, source, onSaved, onCancel, onOpen }: {
           <Button variant="quiet" onClick={notThisBook}>Not this book? Clear the fields</Button>
         </div>
       )}
-      <BookForm key={formKey} initial={d} submitLabel={dups.length ? 'Save another copy' : 'Save to library'} onSubmit={save} onCancel={onCancel} />
+      <BookForm key={formKey} initial={d} submitLabel={dups.length ? 'Save as a separate copy' : 'Save to library'} onSubmit={save} onCancel={onCancel}
+        secondary={dups.length ? { label: 'Add to the existing entry', onSubmit: addToExisting } : undefined} />
     </div>
   );
 }

@@ -19,7 +19,8 @@
  */
 import Papa from 'papaparse';
 import type { Book } from './types';
-import { newId } from './types';
+import { newId, unionFormats } from './types';
+import { BookIndex, sameBook } from './match';
 
 export type AudibleItem = Pick<Book, 'title' | 'authors' | 'narrators' | 'length' | 'asin' | 'coverUrl' | 'isbn13' | 'isbn10'>;
 
@@ -74,7 +75,7 @@ export function isAudibleJson(data: unknown): boolean {
   const lib = d.library ?? (d.audibledata as Record<string, unknown> | undefined)?.library;
   if (!Array.isArray(lib)) return false;
   const first = (lib.flat(2) as Record<string, unknown>[])[0];
-  return !first || ('asin' in first && 'title' in first);
+  return !first || (typeof first === 'object' && 'asin' in first && !('readDates' in first));
 }
 
 export function parseAudibleJson(text: string): AudibleItem[] {
@@ -86,8 +87,10 @@ export function parseAudibleJson(text: string): AudibleItem[] {
 
 const headerKey = (h: string) => h.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[\s_]/g, '');
 
+/** True for an extractor spreadsheet. Our own export (id, readDates, formats, addedAt) is never Audible. */
 export function isAudibleHeaders(headers: string[]): boolean {
   const k = headers.map(headerKey);
+  if (['id', 'readdates', 'formats', 'addedat', 'updatedat'].some(x => k.includes(x))) return false;
   return k.includes('asin') && k.includes('title') && (k.includes('narrators') || k.includes('length') || k.includes('titleshort') || k.includes('bookshelves'));
 }
 
@@ -114,36 +117,59 @@ export function parseAudibleCsv(text: string): AudibleItem[] {
   return res.data.map(fromAudibleRow).filter((b): b is AudibleItem => !!b);
 }
 
-/** Normalised "title|first author" key for fallback matching. */
-export function titleAuthorKey(title: string, authors: string): string {
-  const norm = (s: string) => s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
-    .replace(/&/g, ' and ').replace(/['\u2019]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().replace(/^(the|a|an) /, '');
-  const t = norm(title.split(':')[0]);
-  const a = norm(authors.split(/[;,]/)[0] ?? '');
-  return `${t}|${a}`;
+export { titleAuthorKey } from './match';
+
+export interface AudiblePlan {
+  add: Book[];          // brand new entries (formats: Audiobook)
+  update: Book[];       // existing entries that gained Audiobook or audio details
+  newCount: number;
+  mergedCount: number;  // existing print/ebook entries that now also own the audiobook
+  existingCount: number; // already owned as audiobook
+  skippedInFile: number;
 }
 
-export interface AudiblePlan { add: Book[]; newCount: number; existingCount: number; skippedInFile: number }
-
-/** Only new purchases are added. Matches on ASIN, then normalised title + first author. */
+/**
+ * Only new purchases are added. Matching (match.ts): ASIN first, then ISBN-13, then
+ * normalised full title + first author, never title alone, and never across two
+ * different ASINs. A match on a print or ebook entry adds Audiobook to it.
+ */
 export function planAudibleImport(existing: Book[], items: AudibleItem[], now = new Date().toISOString()): AudiblePlan {
-  const asins = new Set(existing.map(b => b.asin).filter(Boolean));
-  // Title + author fallback only matches audiobooks, so owning the print edition doesn't block the audiobook.
-  const keys = new Set(existing.filter(b => b.format === 'Audiobook').map(b => titleAuthorKey(b.title, b.authors)));
-  const plan: AudiblePlan = { add: [], newCount: 0, existingCount: 0, skippedInFile: 0 };
-  const seenAsin = new Set<string>();
-  const seenKey = new Set<string>();
+  const idx = new BookIndex<Book>(existing);
+  const isExisting = new Set(existing.map(b => b.id));
+  const changed = new Map<string, Book>();
+  const plan: AudiblePlan = { add: [], update: [], newCount: 0, mergedCount: 0, existingCount: 0, skippedInFile: 0 };
+
   for (const it of items) {
-    const key = titleAuthorKey(it.title, it.authors);
-    if ((it.asin && asins.has(it.asin)) || keys.has(key)) { plan.existingCount++; continue; }
-    if ((it.asin && seenAsin.has(it.asin)) || seenKey.has(key)) { plan.skippedInFile++; continue; }
-    if (it.asin) seenAsin.add(it.asin);
-    seenKey.add(key);
-    plan.add.push({
-      id: newId(), ...it, format: 'Audiobook', publisher: '', year: '', pages: '', shelf: '', notes: '',
+    const m = idx.find({ ...it, isbn13: it.isbn13 }, { useId: false });
+    if (m && !isExisting.has(m.id)) { plan.skippedInFile++; continue; }
+    if (m) {
+      const hadAudio = m.formats.includes('Audiobook');
+      const next: Book = {
+        ...m,
+        formats: unionFormats(m.formats, ['Audiobook']),
+        asin: m.asin || it.asin,
+        narrators: m.narrators || it.narrators,
+        length: m.length || it.length,
+        coverUrl: m.coverUrl || it.coverUrl,
+        isbn13: m.isbn13 || it.isbn13,
+        isbn10: m.isbn10 || it.isbn10,
+      };
+      if (hadAudio) plan.existingCount++; else plan.mergedCount++;
+      if (!sameBook(next, m)) {
+        next.updatedAt = now;
+        idx.replace(m, next);
+        changed.set(next.id, next);
+      }
+      continue;
+    }
+    const b: Book = {
+      id: newId(), ...it, formats: ['Audiobook'], publisher: '', year: '', pages: '', shelf: '', notes: '',
       readDates: [], addedAt: now, updatedAt: now,
-    });
+    };
+    idx.add(b);
+    plan.add.push(b);
     plan.newCount++;
   }
+  plan.update = [...changed.values()];
   return plan;
 }

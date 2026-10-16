@@ -36,8 +36,9 @@ export function AddView({ onReview }: { onReview: (d: Draft, source?: string) =>
     if (!v) return;
     if (looksLikeIsbn(v)) {
       const c = checkIsbn(v);
-      if (!c.ok) { setSt({ s: 'invalid', msg: isbnErrorText(c.reason) }); return; }
-      return runIsbn(c.isbn13);
+      if (c.ok) return runIsbn(c.isbn13);
+      // Not 10 or 13 digits: probably a numeric title like "2001", so search instead.
+      if (c.reason !== 'length') { setSt({ s: 'invalid', msg: isbnErrorText(c.reason) }); return; }
     }
     setSt({ s: 'busy', label: `Searching for "${v}"` });
     const r = await searchBooks(v);

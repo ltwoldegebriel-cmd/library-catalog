@@ -8,9 +8,14 @@ export type LookupResult =
   | { status: 'offline' }
   | { status: 'error'; message: string };
 
+/** Shared deadline so a hanging service can't stall a lookup for long. */
+let deadline: AbortSignal | undefined;
+
 async function getJson(url: string, ms = 9000): Promise<any | null> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
+  const onDeadline = () => ctrl.abort();
+  deadline?.addEventListener('abort', onDeadline);
   try {
     const r = await fetch(url, { signal: ctrl.signal });
     if (r.status === 404) return null;
@@ -18,6 +23,7 @@ async function getJson(url: string, ms = 9000): Promise<any | null> {
     return await r.json();
   } finally {
     clearTimeout(t);
+    deadline?.removeEventListener('abort', onDeadline);
   }
 }
 
@@ -76,24 +82,38 @@ async function googleBooks(isbn13: string): Promise<Draft | null> {
   return v ? fromGoogle(v, isbn13) : null;
 }
 
-/** Open Library first, Google Books second. Only the ISBN is sent. */
-export async function lookupIsbn(isbn13: string): Promise<LookupResult> {
+export const LOOKUP_BUDGET_MS = 10000;
+
+/**
+ * Open Library and Google Books are queried in parallel under one 10 s budget; Open
+ * Library's answer is preferred. Only the ISBN is sent. If nothing matched and any
+ * service failed, the result is an error ("try again"), not "not found".
+ */
+export async function lookupIsbn(isbn13: string, budgetMs = LOOKUP_BUDGET_MS): Promise<LookupResult> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return { status: 'offline' };
-  let failures = 0;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), budgetMs);
+  deadline = ctrl.signal;
+  const settle = <T,>(p: Promise<T>) => p.then(v => ({ ok: true as const, v }), () => ({ ok: false as const, v: null }));
   try {
-    const d = await openLibrary(isbn13);
-    if (d) return { status: 'found', draft: d, source: 'Open Library' };
-  } catch { failures++; }
-  try {
-    const d = await googleBooks(isbn13);
-    if (d) return { status: 'found', draft: d, source: 'Google Books' };
-  } catch { failures++; }
-  if (failures === 2) {
-    return navigator.onLine === false
-      ? { status: 'offline' }
-      : { status: 'error', message: 'Both lookup services failed to respond.' };
+    const ol = settle(openLibrary(isbn13));
+    const gb = settle(googleBooks(isbn13));
+    const o = await ol;
+    if (o.ok && o.v) return { status: 'found', draft: o.v, source: 'Open Library' };
+    const g = await gb;
+    if (g.ok && g.v) return { status: 'found', draft: g.v, source: 'Google Books' };
+    if (!o.ok || !g.ok) {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return { status: 'offline' };
+      const both = !o.ok && !g.ok;
+      return { status: 'error', message: ctrl.signal.aborted
+        ? 'The lookup took too long. Check your connection and try again, or enter the details by hand.'
+        : both ? 'Both lookup services failed to respond.' : 'A lookup service had a problem and the other found no match. Try again in a moment.' };
+    }
+    return { status: 'notfound' };
+  } finally {
+    clearTimeout(timer);
+    deadline = undefined;
   }
-  return { status: 'notfound' };
 }
 
 /** Title or author search via the Open Library search API, Google Books fallback. */

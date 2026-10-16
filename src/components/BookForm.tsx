@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { FORMATS, type Draft, type Format } from '../lib/types';
+import { FORMATS, sortFormats, type Draft, type Format } from '../lib/types';
 import { checkIsbn, isbnErrorText, cleanIsbn } from '../lib/isbn';
 import { Button, Cover, Field, Input } from './ui';
 
-export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra }: {
-  initial: Draft; submitLabel: string;
+export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra, secondary }: {
+  initial: Draft; submitLabel: string; secondary?: { label: string; onSubmit: (d: Draft) => void };
   onSubmit: (d: Draft) => void; onCancel: () => void; extra?: React.ReactNode;
 }) {
   const [d, setD] = useState<Draft>(initial);
@@ -15,13 +15,16 @@ export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra }: {
   const isbnChk = isbnRaw ? checkIsbn(isbnRaw) : null;
   const titleMissing = !d.title.trim();
 
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
+  function finish(cb: (d: Draft) => void) {
     setTouched(true);
     if (titleMissing) return;
     let out = { ...d, title: d.title.trim() };
     if (isbnChk?.ok) out = { ...out, isbn13: isbnChk.isbn13, isbn10: isbnChk.isbn10 ?? '' };
-    onSubmit(out);
+    cb(out);
+  }
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    finish(secondary ? secondary.onSubmit : onSubmit);
   }
 
   return (
@@ -38,14 +41,27 @@ export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra }: {
           </Field>
         </div>
       </div>
-      <div role="radiogroup" aria-label="Format" className="grid grid-cols-3 rounded-lg border border-line overflow-hidden">
-        {FORMATS.map(f => (
-          <button key={f} type="button" role="radio" aria-checked={d.format === f} onClick={() => setD({ ...d, format: f as Format })}
-            className={`min-h-11 text-[15px] ${d.format === f ? 'bg-accent text-ink font-semibold' : 'text-muted hover:text-fg'}`}>{f}</button>
-        ))}
+      <div>
+        <span className="block text-xs uppercase tracking-wider text-muted mb-1.5">Formats you own</span>
+        <div role="group" aria-label="Formats you own" className="grid grid-cols-3 rounded-lg border border-line overflow-hidden">
+          {FORMATS.map(f => {
+            const on = d.formats.includes(f);
+            const toggle = () => {
+              const next = on ? d.formats.filter(x => x !== f) : sortFormats([...d.formats, f as Format]);
+              if (next.length) setD({ ...d, formats: next });
+            };
+            return (
+              <button key={f} type="button" aria-pressed={on} onClick={toggle}
+                className={`min-h-11 text-[15px] inline-flex items-center justify-center gap-1.5 ${on ? 'bg-accent text-ink font-semibold' : 'text-muted hover:text-fg'}`}>
+                {on && <span aria-hidden>&#10003;</span>}{f}
+              </button>
+            );
+          })}
+        </div>
+        <span className="block text-xs text-muted mt-1">Pick every format you have. At least one.</span>
       </div>
       <div className="grid grid-cols-2 gap-4">
-        {(d.format === 'Audiobook' || d.narrators || d.length) && (<>
+        {(d.formats.includes('Audiobook') || d.narrators || d.length) && (<>
           <div className="col-span-2"><Field label="Narrators" hint="Separate several with a semicolon."><Input value={d.narrators} onChange={set('narrators')} /></Field></div>
           <Field label="Length"><Input value={d.length} onChange={set('length')} placeholder="11h 2m" /></Field>
           <Field label="ASIN"><Input value={d.asin} onChange={set('asin')} /></Field>
@@ -70,7 +86,8 @@ export function BookForm({ initial, submitLabel, onSubmit, onCancel, extra }: {
       </div>
       {extra}
       <div className="flex flex-wrap gap-3 pt-2">
-        <Button type="submit" variant="primary" className="flex-1 min-w-36">{submitLabel}</Button>
+        {secondary && <Button type="submit" variant="primary" className="w-full">{secondary.label}</Button>}
+        <Button type={secondary ? 'button' : 'submit'} variant={secondary ? 'ghost' : 'primary'} onClick={secondary ? () => finish(onSubmit) : undefined} className="flex-1 min-w-36">{submitLabel}</Button>
         <Button type="button" onClick={onCancel} className="flex-1 min-w-36">Cancel</Button>
       </div>
     </form>

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "stress": "vitest run --config stress/vitest.config.ts"
   },
   "dependencies": {
     "@zxing/browser": "^0.2.1",
